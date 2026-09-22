@@ -1,155 +1,79 @@
 package ch.bzz;
 
+import ch.bzz.command.AppContext;
+import ch.bzz.command.Command;
+import ch.bzz.command.CommandRegistry;
+import ch.bzz.command.CreateUserCommand;
+import ch.bzz.command.HelpCommand;
+import ch.bzz.command.ImportBooksCommand;
+import ch.bzz.command.ListBooksCommand;
+import ch.bzz.command.QuitCommand;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Scanner;
-import java.util.function.Consumer;
 
+/**
+ * Einstiegspunkt der Bibliotheksapplikation. Die Klasse liest Befehle von der
+ * Konsole und delegiert sie an die passende {@link Command}-Implementierung.
+ * Was ein einzelner Befehl tut, steht darum nicht hier, sondern im jeweiligen
+ * Befehl selbst.
+ */
 public class LibraryAppMain {
 
     private static final Logger log = LoggerFactory.getLogger(LibraryAppMain.class);
 
-    private static final String IMPORT_FILE = "books.csv";
-
-    private static final List<Book> books = new ArrayList<>();
+    /** Trennt den Befehlsnamen vom Rest der Eingabe. */
+    private static final String INPUT_SEPARATOR = "\s+";
 
     public static void main(String[] args) {
+        CommandRegistry registry = createRegistry();
+        AppContext context = new AppContext();
+
         log.info("Applikation gestartet");
+        Scanner scanner = new Scanner(System.in);
 
-        Map<String, Consumer<String>> commands = new LinkedHashMap<>();
-        commands.put("help", argument -> System.out.println(String.join(", ", commands.keySet())));
-        commands.put("importBooks", argument -> importBooks());
-        commands.put("listBooks", LibraryAppMain::listBooks);
-        commands.put("quit", argument -> { });
+        while (context.isRunning() && scanner.hasNextLine()) {
+            System.out.print("> ");
+            String input = scanner.nextLine().trim();
 
-        try (Scanner scanner = new Scanner(System.in)) {
-            while (scanner.hasNextLine()) {
-                String input = scanner.nextLine().trim();
+            if (input.isEmpty()) {
+                continue;
+            }
 
-                if ("quit".equals(input)) {
-                    break;
-                }
+            String[] parts = input.split(INPUT_SEPARATOR, 2);
+            String name = parts[0];
+            String argument = parts.length > 1 ? parts[1].trim() : "";
 
-                String command = input;
-                String argument = "";
-                int separator = input.indexOf(' ');
-                if (separator > -1) {
-                    command = input.substring(0, separator);
-                    argument = input.substring(separator + 1).trim();
-                }
+            log.debug("Befehl '{}' mit Argument '{}' erhalten", name, argument);
 
-                log.debug("Befehl '{}' mit Argument '{}' erhalten", command, argument);
-
-                Consumer<String> action = commands.get(command);
-                if (action != null) {
-                    action.accept(argument);
-                } else {
-                    log.warn("Unbekannter Befehl eingegeben: '{}'", command);
-                    System.out.println("Befehl nicht erkannt: " + command);
-                }
+            Command command = registry.find(name);
+            if (command == null) {
+                log.warn("Unbekannter Befehl eingegeben: '{}'", name);
+                System.out.println("Die Eingabe wurde nicht als Befehl erkannt: " + input);
+            } else {
+                command.execute(context, argument);
             }
         }
 
+        scanner.close();
         log.info("Applikation beendet");
     }
 
-   
-    private static void importBooks() {
-        try (InputStream input = LibraryAppMain.class.getClassLoader().getResourceAsStream(IMPORT_FILE)) {
-            if (input == null) {
-                log.warn("Importdatei '{}' wurde nicht gefunden, es werden keine Buecher importiert", IMPORT_FILE);
-                System.out.println("Importdatei nicht gefunden: " + IMPORT_FILE);
-                return;
-            }
+    /**
+     * Registriert alle Befehle. Ein neuer Befehl wird hier ergaenzt und
+     * erscheint danach automatisch auch in der Ausgabe von "help".
+     */
+    private static CommandRegistry createRegistry() {
+        CommandRegistry registry = new CommandRegistry();
 
-            List<Book> imported = readBooks(input);
-            books.clear();
-            books.addAll(imported);
+        registry.register(new HelpCommand(registry));
+        registry.register(new ListBooksCommand());
+        registry.register(new ImportBooksCommand());
+        registry.register(new CreateUserCommand());
+        registry.register(new QuitCommand());
 
-            log.info("{} Buecher aus '{}' importiert", imported.size(), IMPORT_FILE);
-            System.out.println(imported.size() + " Buecher importiert.");
-        } catch (IOException e) {
-            log.error("Fehler beim Lesen der Importdatei '{}'", IMPORT_FILE, e);
-            System.out.println("Import fehlgeschlagen: " + IMPORT_FILE);
-        }
-    }
-
-    private static List<Book> readBooks(InputStream input) throws IOException {
-        List<Book> imported = new ArrayList<>();
-
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
-            String line;
-            boolean header = true;
-            int lineNumber = 0;
-
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-
-                if (header) {
-                    header = false;
-                    continue;
-                }
-                if (line.isBlank()) {
-                    continue;
-                }
-
-                String[] parts = line.split(";");
-                if (parts.length < 3) {
-                    log.warn("Zeile {} hat zu wenige Felder und wird uebersprungen: '{}'", lineNumber, line);
-                    continue;
-                }
-
-                try {
-                    imported.add(new Book(parts[0].trim(), parts[1].trim(), Integer.parseInt(parts[2].trim())));
-                } catch (NumberFormatException e) {
-                    log.warn("Zeile {} enthaelt kein gueltiges Jahr und wird uebersprungen: '{}'", lineNumber, line);
-                }
-            }
-        }
-
-        return imported;
-    }
-
-    
-    private static void listBooks(String argument) {
-        int limit = books.size();
-
-        if (!argument.isEmpty()) {
-            try {
-                limit = Integer.parseInt(argument);
-
-                if (limit < 0) {
-                    log.warn("Negatives Limit '{}' angegeben, es werden alle Buecher ausgegeben", argument);
-                    limit = books.size();
-                } else {
-                    limit = Math.min(limit, books.size());
-                }
-            } catch (NumberFormatException e) {
-                log.warn("Ungueltiges Limit '{}' angegeben, es werden alle Buecher ausgegeben", argument, e);
-                System.out.println("Ungueltiges Limit: " + argument + " - es werden alle Buecher ausgegeben.");
-            }
-        }
-
-        if (books.isEmpty()) {
-            log.info("listBooks aufgerufen, es sind keine Buecher geladen");
-            System.out.println("Keine Buecher vorhanden. Zuerst 'importBooks' ausfuehren.");
-            return;
-        }
-
-        for (Book book : books.subList(0, limit)) {
-            System.out.println(book);
-        }
-
-        log.debug("{} von {} Buechern ausgegeben", limit, books.size());
+        return registry;
     }
 }

@@ -1,21 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <!-- Die Applikation wird ueber die Konsole bedient. Deshalb gehen die
-         Log-Eintraege in eine Datei und nicht auf System.out/System.err. -->
+    <!-- Die Applikation wird ueber die Konsole bedient. Die Log-Eintraege
+         gehen darum in eine Datei; nur Fehler erscheinen zusaetzlich auf
+         System.err, damit sie nicht unbemerkt bleiben. -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/library-app.log</file>
+        <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <fileNamePattern>logs/library-app.%d{yyyy-MM-dd}.log</fileNamePattern>
             <maxHistory>30</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <encoder>
+            <pattern>%d{HH:mm:ss} %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
     <root level="DEBUG">
         <appender-ref ref="FILE"/>
+        <appender-ref ref="STDERR"/>
     </root>
 
 </configuration>
